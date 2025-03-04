@@ -33,15 +33,18 @@ json_response = parser.parse(response)['destination']
 #=======================================
 
 #FOR TABLE QUERY EXAMPLE
-# query = 'what is batch job'
-# table_str = [row.split('|') for row in table_db_1.answer_query(query, "")[0].split('\n')]
+# query = 'How to access Lmod programming environment modules?'
+# table, answer = table_db_1.answer_query(query, "")
+# table_str = [row.split('|') for row in table.split('\n')]
 # df = pd.DataFrame(table_str[1:], columns=table_str[0])
+# print(answer)
 # print(df)
 
 #FOR TEXT QUERY EXAMPLE
 # query = 'what is batch job'
-# result = table_db_1.answer_query(query, "")
+# result = text_db_1.answer_query(query, "")
 
 #FOR IMAGE QUERY EXAMPLE
 # query = 'show me image of frontier gpu archiecture'
-# result = image_db_1.answer_query(query, "")
+# result = image_db_1.answer_query(query)
+# print("path to iage is : ", result.get('metadatas',[])[0][0]['path'])
