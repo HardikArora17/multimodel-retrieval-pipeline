@@ -72,7 +72,7 @@ class ImageDatabase:
 
     def answer_query(self,text_query):
         query_vector = self.encode_clip_text(text_query)
-        search_result = self.collections.query(query_embeddings=[query_vector], n_results=1)
+        search_result = self.collection.query(query_embeddings=[query_vector], n_results=1)
         return search_result if search_result else "No relevant image found"
 
 # Table Database Class
@@ -82,25 +82,61 @@ class TableDatabase:
         self.text_model = SentenceTransformer("mixedbread-ai/mxbai-embed-large-v1", trust_remote_code=True)
         self.retriever = MxbaiRetriever('mixedbread-ai/mxbai-embed-large-v1',collection)
         self.ranker = MxbaiReranker('mixedbread-ai/mxbai-rerank-large-v1')
+        self.generator = LlamaGenerator('meta-llama/Llama-3.2-1B-Instruct')
     
     def encode_table_as_text(self, table):
+        table_str = "\n".join([(" | ".join(map(str, row))).replace("\n","") for row in table])  # Convert to readable text
+        return table_str
 
-      table_str = "\n".join([(" | ".join(map(str, row))).replace("\n","") for row in table])  # Convert to readable text
-      return table_str
-
-    def index(self, table):
+    def index(self, table, table_desc):
         table_str = self.encode_table_as_text(table)
-        vector = self.text_model.encode(table_str).tolist()
+        vector = self.text_model.encode(table_desc).tolist()
         metadata = {"table": table_str}
         self.collection.add(embeddings=[vector], metadatas=[metadata], ids=[str(len(self.collection.get()["ids"]) + 1)])
 
     def answer_query(self, query, client):
       query_vector = self.text_model.encode(query).tolist()
       result = self.collection.query(query_embeddings=[query_vector], n_results=1)
-      retrieved_chunks = list(set([chunk_dict['table'] for chunk_dict in result['metadatas'][0]]))
-      return retrieved_chunks
+      retrieved_table = list(set([chunk_dict['table'] for chunk_dict in result['metadatas'][0]]))[0]
+      table_str = [[row.split('|') for row in retrieved_table.split('\n')]]
+      answer = self.generator.generate(query, table_str, query_type='table', max_new_tokens=1024, top_p=0.9, temperature=0.1)
+      return retrieved_table, answer 
 
+from openai import OpenAI
+import json
+OPENAI_APIKEY = ''
+openai_client = OpenAI(api_key=OPENAI_APIKEY)
+import os
+from docutils.core import publish_doctree
 
+def generate_table_description(table):
+    table_df = pd.DataFrame(table[1:], columns=table[0])
+    markdown_table = table_df.to_markdown(index=False)
+    prompt = f"""
+    The following is a table extracted from a PDF:
+    
+    {markdown_table}
+    
+    Generate a 50 word summary about what are the contents of this table, as if writing a header to describe the table. Only output the description no extra text.
+    """
+        
+    response = openai_client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {
+                "role": "user",
+                "content": prompt,
+            }
+        ],
+        temperature=0.6,
+        max_tokens=512,
+        top_p=1,
+        frequency_penalty=0,
+        presence_penalty=0
+    )
+    
+    return response.choices[0].message.content
+    
 def initialize_dbs(client):
   # try:
   #   client.delete_collection("text_v1")
@@ -178,17 +214,16 @@ def create_database(text_db, image_db, table_db, document_folder = '/content/doc
       output_dict = {}
       for i, text in tqdm(enumerate(text_content)):
         text_db.index(text)
-        if i>50:
-          break
-      
+       
       if len(images)>0:
         image_db.add_data(images)
         print(images)
 
       for i, table in tqdm(enumerate(tables)):
-        table_db.index(table)
-      
-
+          table_description = generate_table_description(table)
+          print(table_description)
+          table_db.index(table, table_description)
+        
       count+=1
       if count>1:
         break
